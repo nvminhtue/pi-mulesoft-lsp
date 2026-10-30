@@ -58,7 +58,13 @@ function newestXsdMtime(root: string, deps: Deps): number {
 			seen++;
 			const path = join(dir, entry.name);
 			if (entry.isDirectory()) stack.push(path);
-			else if (entry.name.endsWith(".xsd")) newest = Math.max(newest, deps.fs.statSync(path).mtimeMs);
+			else if (entry.name.endsWith(".xsd")) {
+				try {
+					newest = Math.max(newest, deps.fs.statSync(path).mtimeMs);
+				} catch {
+					continue; // e.g. a dangling symlink
+				}
+			}
 		}
 	}
 	return newest;

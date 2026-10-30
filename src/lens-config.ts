@@ -137,18 +137,21 @@ export type ApplyResult =
 /** Read, merge and atomically write `configPath`; `.bak` only when content changes and none exists yet. */
 export function applyServerEntry(configPath: string, entry: MuleServerEntry, deps: Pick<Deps, "fs">): ApplyResult {
 	const { fs } = deps;
-	const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : undefined;
+	const isExisting = fs.existsSync(configPath);
+	// Write next to the real target so a symlinked config stays a symlink.
+	const targetPath = isExisting ? fs.realpathSync(configPath) : configPath;
+	const existing = isExisting ? fs.readFileSync(targetPath, "utf8") : undefined;
 	const merged = mergeServerEntry(existing, entry);
 	if (!merged.ok) return { status: "refused", path: configPath, reason: merged.reason, manual: merged.manual };
 	if (!merged.changed) return { status: "unchanged", path: configPath, backedUp: false };
 
-	const backupPath = `${configPath}.bak`;
+	const backupPath = `${targetPath}.bak`;
 	const shouldBackUp = existing !== undefined && !fs.existsSync(backupPath);
-	if (shouldBackUp) fs.copyFileSync(configPath, backupPath);
-	fs.mkdirSync(dirname(configPath), { recursive: true });
-	const tmpPath = `${configPath}.${process.pid}.tmp`;
+	if (shouldBackUp) fs.copyFileSync(targetPath, backupPath);
+	fs.mkdirSync(dirname(targetPath), { recursive: true });
+	const tmpPath = `${targetPath}.${process.pid}.tmp`;
 	fs.writeFileSync(tmpPath, merged.output);
-	fs.renameSync(tmpPath, configPath);
+	fs.renameSync(tmpPath, targetPath);
 	return { status: "written", path: configPath, backedUp: shouldBackUp };
 }
 

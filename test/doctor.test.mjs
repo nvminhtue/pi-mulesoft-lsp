@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { utimesSync } from "node:fs";
+import { symlinkSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { collectChecks, formatReport, worstStatus } from "../src/doctor.ts";
@@ -120,4 +120,12 @@ test("formatReport marks statuses and lists unique next steps", async () => {
 	assert.match(report, /✗ Schema catalog — missing: /);
 	assert.match(report, /\nNext:\n {2}- Run \/mule-lsp catalog/);
 	assert.equal(report.split("Run /mule-lsp catalog").length - 1, 1);
+});
+
+test("a dangling .xsd symlink does not make doctor throw", async () => {
+	const { deps, context, connectors } = setup();
+	symlinkSync(join(connectors, "missing-target.xsd"), join(connectors, "http/1.0/broken.xsd"));
+	const items = byId(await collectChecks(context, deps));
+	assert.ok(items.freshness);
+	assert.equal(items.freshness.status, "ok");
 });

@@ -207,3 +207,22 @@ test("findMuleServer finds project and global registrations and skips broken fil
 	assert.equal(found.project.path, join(project, ".pi-lens.json"));
 	assert.equal(found.global.path, deps.env.PI_LENS_CONFIG_PATH);
 });
+
+test("apply: a symlinked config stays a symlink; the real target is updated and backed up beside it", () => {
+	const deps = makeDeps();
+	const dir = makeTmp();
+	const target = join(dir, "dotfiles/pi-lens.json");
+	const link = join(dir, "config.json");
+	writeFile(target, '{"lsp":{"disabledServers":["typos"]}}');
+	realFs.symlinkSync(target, link);
+	const result = applyServerEntry(link, entryFor(deps), deps);
+	assert.equal(result.status, "written");
+	assert.equal(realFs.lstatSync(link).isSymbolicLink(), true);
+	assert.equal(realFs.realpathSync(link), target);
+	const config = readJson(target);
+	assert.deepEqual(config.lsp.disabledServers, ["typos"]);
+	assert.ok(config.lsp.servers["mule-xml"]);
+	assert.match(realFs.readFileSync(`${target}.bak`, "utf8"), /typos/);
+	assert.equal(realFs.existsSync(`${link}.bak`), false);
+	assert.deepEqual(realFs.readdirSync(join(dir, "dotfiles")).sort(), ["pi-lens.json", "pi-lens.json.bak"]);
+});

@@ -262,3 +262,16 @@ test("hint never throws, even when the filesystem does", () => {
 	assert.equal(notices.length, 0);
 	assert.throws(() => computeHint({ cwd: project, isProjectTrusted: () => true }, services), /EIO/);
 });
+
+test("init rejects unknown flags without doing anything", async () => {
+	for (const args of ["init --globl", "init -g", "init --yes --bogus"]) {
+		notices = [];
+		await run(args);
+		assert.equal(lastNotice().level, "error", args);
+		assert.match(lastNotice().message, /unknown option .*Usage: \/mule-lsp init/, args);
+	}
+	assert.equal(existsSync(join(project, ".pi-lens.json")), false);
+	assert.equal(existsSync(services.env.PI_LENS_CONFIG_PATH), false);
+	assert.equal(existsSync(shimPath(services)), false);
+	assert.equal(runs.length, 0);
+});

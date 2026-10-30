@@ -41,9 +41,14 @@ export interface InitArgs {
 	dir?: string;
 }
 
+const INIT_FLAGS = ["--global", "--yes"];
+
+/** Throws on any token starting with "-" that is not a known flag. */
 export function parseInitArgs(tokens: string[]): InitArgs {
-	const flags = tokens.filter((token) => token.startsWith("--"));
-	const positional = tokens.filter((token) => !token.startsWith("--"));
+	const flags = tokens.filter((token) => token.startsWith("-"));
+	const unknown = flags.filter((flag) => !INIT_FLAGS.includes(flag));
+	if (unknown.length > 0) throw new Error(`unknown option ${unknown.join(", ")}. Usage: /mule-lsp init [dir] [--global] [--yes]`);
+	const positional = tokens.filter((token) => !token.startsWith("-"));
 	return { isGlobal: flags.includes("--global"), isConfirmed: flags.includes("--yes"), dir: positional[0] };
 }
 
