@@ -115,7 +115,7 @@ test("formatReport marks statuses and lists unique next steps", async () => {
 	const { deps, context } = setup();
 	deps.fs.rmSync(catalogPath(deps));
 	const report = formatReport(await collectChecks({ ...context, toolNames: [] }, deps));
-	assert.match(report, /^pi-mulesoft-lsp doctor \(v0\.1\.0/);
+	assert.match(report, /^pi-mulesoft-lsp doctor \(v\d+\.\d+\.\d+/);
 	assert.match(report, /✓ Mule project — /);
 	assert.match(report, /✗ Schema catalog — missing: /);
 	assert.match(report, /\nNext:\n {2}- Run \/mule-lsp catalog/);
