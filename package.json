@@ -1,20 +1,40 @@
 {
   "name": "pi-mulesoft-lsp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "description": "Pi extension: MuleSoft XML diagnostics in pi-lens via the Mule DX LemMinX server (/mule-lsp init|catalog|doctor)",
-  "keywords": ["pi-package", "pi", "pi-lens", "mulesoft", "mule", "lsp", "lemminx", "xml", "anypoint"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-lens",
+    "mulesoft",
+    "mule",
+    "lsp",
+    "lemminx",
+    "xml",
+    "anypoint"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nvminhtue/pi-mulesoft-lsp.git"
   },
   "pi": {
-    "extensions": ["./src/index.ts"],
-    "skills": ["./skills"]
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
   },
-  "files": ["src", "bin", "skills", "README.md", "LICENSE"],
+  "files": [
+    "src",
+    "bin",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test \"test/*.test.mjs\"",
