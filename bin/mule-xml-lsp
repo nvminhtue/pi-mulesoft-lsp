@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# MuleSoft XML language server (LemMinX bundled in the Mule DX VS Code extension), stdio transport.
+# stdout is the LSP channel: this script NEVER prints to stdout (diagnostics go to stderr).
+# Usage: mule-xml-lsp [--check]
+# Env: MULE_LSP_JAVA_HOME, MULE_LSP_STUDIO, MULE_LSP_VSCODE_EXT,
+#      MULE_LSP_REQUIRE_MARKER=1 (serve a no-op LSP unless a mule-artifact.json is within 2 levels of $PWD),
+#      MULE_LSP_NODE (node binary used for the no-op LSP).
+set -euo pipefail
+shopt -s nullglob
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+# --- Global-mode gate: runs before any Java lookup so non-Mule XML never spawns a JVM ---
+if [ "${MULE_LSP_REQUIRE_MARKER:-}" = "1" ] && [ "${1:-}" != "--check" ]; then
+  has_marker=0
+  for candidate in "$PWD"/mule-artifact.json "$PWD"/*/mule-artifact.json "$PWD"/*/*/mule-artifact.json; do
+    if [ -e "$candidate" ]; then has_marker=1; break; fi
+  done
+  if [ "$has_marker" -eq 0 ]; then
+    exec "${MULE_LSP_NODE:-node}" "$HERE/mule-null-lsp.mjs"
+  fi
+fi
+
+fail() { echo "mule-xml-lsp: ERROR: $1" >&2; exit 1; }
+
+# latest_of <glob-expanded paths...> -> newest by version order ("" if none)
+latest_of() { [ "$#" -gt 0 ] && printf '%s\n' "$@" | sort -V | tail -1 || true; }
+
+STUDIO="${MULE_LSP_STUDIO:-/Applications/AnypointStudio.app}"
+PLUG="$STUDIO/Contents/Eclipse/plugins"
+EXT_ROOT="${MULE_LSP_VSCODE_EXT:-$HOME/.vscode/extensions}"
+
+CHECK=0
+[ "${1:-}" = "--check" ] && CHECK=1
+MISSING=()
+# report_missing <key> <hint>: in --check mode record and continue, otherwise fail fast
+report_missing() {
+  if [ "$CHECK" -eq 1 ]; then MISSING+=("$1: $2"); else fail "$2"; fi
+}
+
+# --- Java 17 (bundled with Studio) ---
+if [ -n "${MULE_LSP_JAVA_HOME:-}" ]; then
+  J="$MULE_LSP_JAVA_HOME"
+else
+  J=$(latest_of "$PLUG"/org.mule.tooling.jdk.v17.macosx.*_*/Contents/Home)
+fi
+if [ -n "$J" ] && [ -x "$J/bin/java" ]; then
+  [ "$CHECK" -eq 1 ] && echo "java_home=$J" >&2
+else
+  report_missing java_home "no usable Java 17 (looked for '${J:-$PLUG/org.mule.tooling.jdk.v17.macosx.*_*/Contents/Home}/bin/java'). Set MULE_LSP_JAVA_HOME or MULE_LSP_STUDIO."
+fi
+[ "$CHECK" -eq 1 ] && { [ -d "$STUDIO" ] && echo "studio=$STUDIO" >&2 || MISSING+=("studio: Anypoint Studio not found at '$STUDIO'. Set MULE_LSP_STUDIO."); }
+
+# --- LemMinX dev jar (Mule DX VS Code extension) ---
+DEV=$(latest_of "$EXT_ROOT"/salesforce.mule-dx-mule-dev-component-*/libs/mule-dx-mule-dev-plugin-*-all.jar)
+if [ -n "$DEV" ]; then
+  [ "$CHECK" -eq 1 ] && { echo "dev_jar=$DEV" >&2; echo "vscode_ext=$EXT_ROOT" >&2; }
+else
+  report_missing dev_jar "Mule DX dev jar not found under '$EXT_ROOT'. Install the Mule DX VS Code extension or set MULE_LSP_VSCODE_EXT."
+fi
+
+# --- Studio support jars (digit glob avoids the *.debug bundles) ---
+CP="$DEV"
+for entry in 'lsp4j:org.eclipse.lsp4j_[0-9]*.jar' 'lsp4j.jsonrpc:org.eclipse.lsp4j.jsonrpc_[0-9]*.jar' \
+             'gson:com.google.gson_[0-9]*.jar' 'guava:com.google.guava_[0-9]*.jar' \
+             'failureaccess:com.google.guava.failureaccess_[0-9]*.jar'; do
+  key="${entry%%:*}"; pat="${entry#*:}"
+  jar=$(latest_of "$PLUG"/$pat)
+  if [ -n "$jar" ]; then
+    CP="$CP:$jar"
+    [ "$CHECK" -eq 1 ] && echo "jar.$key=$jar" >&2
+  else
+    report_missing "jar.$key" "Studio jar '$pat' not found in '$PLUG'. Set MULE_LSP_STUDIO to the Anypoint Studio .app path."
+  fi
+done
+
+if [ "$CHECK" -eq 1 ]; then
+  for m in "${MISSING[@]+"${MISSING[@]}"}"; do echo "missing=$m" >&2; done
+  [ "${#MISSING[@]}" -eq 0 ] || exit 1
+  exit 0
+fi
+
+exec "$J/bin/java" -cp "$CP" org.eclipse.lemminx.XMLServerLauncher

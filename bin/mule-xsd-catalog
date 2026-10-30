@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Generate local Mule XSDs (core from the Studio runtime + connectors from Studio's plugin cache)
+# and an XML catalog mapping http://www.mulesoft.org/... schema URLs to them.
+# Usage: mule-xsd-catalog   (takes no arguments; output is always $MULE_LSP_DATA_DIR/xsd)
+# Env: MULE_LSP_DATA_DIR (default $HOME/.pi/agent/mulesoft-lsp), MULE_LSP_STUDIO, MULE_LSP_RUNTIME_DIR,
+#      MULE_LSP_CONNECTOR_XSD_ROOT
+# NOTE: the data dir must not contain spaces (file:// URIs are not percent-encoded).
+set -euo pipefail
+shopt -s nullglob
+
+[ "$#" -eq 0 ] || { echo "mule-xsd-catalog: ERROR: takes no arguments (output is \$MULE_LSP_DATA_DIR/xsd)" >&2; exit 2; }
+DATA="${MULE_LSP_DATA_DIR:-$HOME/.pi/agent/mulesoft-lsp}"
+case "$DATA" in
+  /) echo "mule-xsd-catalog: ERROR: refusing data dir '/'" >&2; exit 2 ;;
+  /*) ;;
+  *) echo "mule-xsd-catalog: ERROR: data dir must be an absolute path: '$DATA'" >&2; exit 2 ;;
+esac
+case "$DATA" in
+  *[[:space:]]*) echo "mule-xsd-catalog: ERROR: data dir must not contain whitespace: '$DATA'" >&2; exit 2 ;;
+esac
+OUT="$DATA/xsd"   # absolute: only this directory is ever replaced
+STUDIO="${MULE_LSP_STUDIO:-/Applications/AnypointStudio.app}"
+PLUG="$STUDIO/Contents/Eclipse/plugins"
+CONN_ROOT="${MULE_LSP_CONNECTOR_XSD_ROOT:-$HOME/AnypointStudio/studio-workspace/.mule/plugins-tmp/repository}"
+
+die() { echo "mule-xsd-catalog: ERROR: $1" >&2; exit 1; }
+WARNINGS=()
+warn() { WARNINGS+=("$1"); }
+
+# --- newest runtime (sort -V: 4.13 > 4.9) ---
+if [ -n "${MULE_LSP_RUNTIME_DIR:-}" ]; then
+  RT="$MULE_LSP_RUNTIME_DIR"
+else
+  RT=$(printf '%s\n' "$PLUG"/org.mule.tooling.server.4.*.ee_* | sort -V | tail -1)
+fi
+SRC="$RT/mule/lib/mule"
+[ -d "$SRC" ] || die "runtime lib dir not found: '$SRC'. Set MULE_LSP_RUNTIME_DIR or MULE_LSP_STUDIO."
+echo "runtime: $RT" >&2
+
+command -v unzip >/dev/null || die "unzip not found"
+mkdir -p "$DATA"
+LOCK="$DATA/xsd.lock"
+mkdir "$LOCK" 2>/dev/null || { echo "mule-xsd-catalog: ERROR: already running (or stale lock: remove '$LOCK')" >&2; exit 3; }
+TMP=$(mktemp -d "$OUT.tmp.XXXX")
+trap 'rm -rf "$TMP"; rmdir "$LOCK" 2>/dev/null || true' EXIT
+mkdir -p "$TMP/jar" "$TMP/xsd"
+X="$TMP/xsd"
+
+# --- core XSDs from the runtime jars ---
+for j in "$SRC"/mule-runtime-extension-model-*.jar "$SRC"/mule-runtime-ee-extension-model-*.jar \
+         "$SRC"/mule-module-extensions-xml-support-*.jar "$SRC"/mule-module-extensions-mule-support-*.jar \
+         "$SRC"/mule-module-autodiscovery-*.jar; do
+  unzip -oq "$j" 'META-INF/*.xsd' -d "$TMP/jar" 2>/dev/null || true
+done
+cp "$TMP"/jar/META-INF/*.xsd "$X/" 2>/dev/null || die "no core XSDs extracted from $SRC"
+[ -f "$X/mule-core.xsd" ] || die "mule-core.xsd missing after extraction"
+cp "$X/mule-core.xsd" "$X/mule.xsd"   # entry point every module imports but the jar doesn't ship
+CORE_COUNT=$(ls "$X"/*.xsd | wc -l | tr -d ' ')
+
+# --- connector XSDs: newest version dir per basename; core files are never overridden ---
+CONN_COUNT=0
+if [ -d "$CONN_ROOT" ]; then
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    base=$(basename "$path")
+    [ -f "$X/$base" ] && continue
+    cp "$path" "$X/$base"; CONN_COUNT=$((CONN_COUNT+1))
+  done < <(
+    find "$CONN_ROOT" -name '*.xsd' ! -name '*-mule-plugin.xsd' \
+      | awk -F/ '{print $(NF-1) "\t" $0}' | sort -t$'\t' -k1,1V | cut -f2- \
+      | awk -F/ '{ last[$NF]=$0 } END { for (b in last) print last[b] }'
+  )
+else
+  warn "connector XSD root not found: $CONN_ROOT (core-only catalog)"
+fi
+
+# --- catalog: (a) <targetNamespace>/current/<file>, (b) every mulesoft.org schemaLocation URL ---
+FINAL="$OUT"
+emit_entries() {
+  local f ns url base
+  for f in "$X"/*.xsd; do
+    base=$(basename "$f")
+    ns=$(grep -oE 'targetNamespace="http://www\.mulesoft\.org/[^"]*"' "$f" | head -1 | sed 's/^targetNamespace="//; s/"$//' || true)
+    [ -n "$ns" ] && echo "$ns/current/$base|$base"
+  done
+  for f in "$X"/*.xsd; do
+    grep -ohE 'schemaLocation="http://www\.mulesoft\.org/[^"]*"' "$f" | sed 's/^schemaLocation="//; s/"$//' || true
+  done | sort -u | while read -r url; do
+    base=$(basename "$url")
+    if [ -f "$X/$base" ]; then echo "$url|$base"; else echo "WARN|no local file for $url" ; fi
+  done
+}
+ENTRIES=$(emit_entries | sort -u)
+while IFS='|' read -r url base; do
+  [ "$url" = "WARN" ] && warn "$base"
+done <<< "$ENTRIES"
+
+{
+  echo '<?xml version="1.0" encoding="UTF-8"?>'
+  echo '<catalog xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog" prefer="system">'
+  while IFS='|' read -r url base; do
+    [ "$url" = "WARN" ] && continue
+    echo "  <system systemId=\"$url\" uri=\"file://$FINAL/$base\"/>"
+    echo "  <uri name=\"$url\" uri=\"file://$FINAL/$base\"/>"
+  done <<< "$ENTRIES"
+  echo '</catalog>'
+} > "$X/catalog.xml"
+ENTRY_COUNT=$(grep -c '<system ' "$X/catalog.xml" || true)
+
+# --- rewrite absolute mulesoft imports to sibling file names (resolve without catalog lookups) ---
+sed -i.bak -E 's#schemaLocation="http://www\.mulesoft\.org/[^"]*/([^"/]+\.xsd)"#schemaLocation="\1"#g' "$X"/*.xsd
+rm -f "$X"/*.xsd.bak
+
+# --- atomic-ish swap so a running server never reads a half-generated catalog ---
+rm -rf "$OUT"
+mv "$X" "$OUT"
+
+echo "core XSDs: $CORE_COUNT, connector XSDs: $CONN_COUNT, catalog <system> entries: $ENTRY_COUNT -> $OUT" >&2
+for w in "${WARNINGS[@]+"${WARNINGS[@]}"}"; do echo "WARN: $w" >&2; done
+echo "summary core=$CORE_COUNT connectors=$CONN_COUNT entries=$ENTRY_COUNT out=$OUT" >&2
