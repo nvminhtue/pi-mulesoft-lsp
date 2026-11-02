@@ -1,6 +1,6 @@
 {
   "name": "pi-mulesoft-lsp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "description": "Pi extension: MuleSoft XML diagnostics in pi-lens via the Mule DX LemMinX server (/mule-lsp init|catalog|doctor)",
