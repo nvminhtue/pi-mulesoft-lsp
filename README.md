@@ -91,7 +91,7 @@ After upgrading Anypoint Studio (new runtime/JDK), or after Studio downloaded a 
 | --- | --- | --- |
 | `MULE_LSP_DATA_DIR` | extension, `mule-xsd-catalog` | Data directory (default `<agentDir>/mulesoft-lsp`); must be absolute with no whitespace |
 | `MULE_LSP_REQUIRE_MARKER` | `mule-xml-lsp` | `1`: serve the no-op LSP unless a `mule-artifact.json` is within 2 levels of the working directory (set by `init --global`) |
-| `MULE_LSP_NODE` | `mule-xml-lsp` | Node binary for the no-op LSP (the shim sets it from the Node that ran `init`) |
+| `MULE_LSP_NODE` | `mule-xml-lsp` | Node binary for the no-op LSP and the stdio proxy (the shim sets it from the Node that ran `init`) |
 | `MULE_LSP_JAVA_HOME` | `mule-xml-lsp` | JDK 17 home (else the newest Studio `org.mule.tooling.jdk.v17.macosx.*`) |
 | `MULE_LSP_STUDIO` | all scripts | Studio `.app` path (default `/Applications/AnypointStudio.app`) |
 | `MULE_LSP_VSCODE_EXT` | `mule-xml-lsp` | VS Code extensions dir (default `~/.vscode/extensions`) |
@@ -100,7 +100,7 @@ After upgrading Anypoint Studio (new runtime/JDK), or after Studio downloaded a 
 | `PI_LENS_CONFIG_PATH` | pi-lens, `init --global` | Explicit global config file |
 | `PI_LENS_LSP_INIT_TIMEOUT_MS` | pi-lens | LSP init timeout, default 15000; measured init here is about 0.8-1.6 s |
 
-`mule-xml-lsp --check` prints `key=value` lines to stderr (`java_home`, `dev_jar`, `jar.*`, `studio`, `vscode_ext`), one `missing=<key>: <hint>` line per problem, and exits 1 if anything is missing. Stdout stays empty.
+`mule-xml-lsp --check` prints `key=value` lines to stderr (`node`, `proxy`, `java_home`, `dev_jar`, `jar.*`, `studio`, `vscode_ext`), one `missing=<key>: <hint>` line per problem, and exits 1 if anything is missing. Stdout stays empty.
 
 ## Migrating from the standalone toolkit
 
@@ -114,6 +114,12 @@ Older setups kept scripts in `~/.pi/agent/mulesoft-lsp/` (`bin/`, `test/`, `READ
 - The catalog maps `<targetNamespace>/current/<file>.xsd` (the URL Mule files use in `xsi:schemaLocation`) plus every schemaLocation URL found in the XSDs to local `file://` paths. Absolute imports inside the XSDs are rewritten to sibling file names.
 - The server attaches to **every** `.xml` file in the project (`pom.xml`, `log4j2.xml`, MUnit...), since no built-in pi-lens server claims `.xml`.
 - `mule-xsd-catalog` takes no arguments, writes only `$MULE_LSP_DATA_DIR/xsd`, and holds a `xsd.lock` directory while running (exit 3 if another run holds it; delete a stale lock by hand).
+
+## Troubleshooting: no diagnostics at all (the stdio proxy)
+
+`mule-xml-lsp` does not start LemMinX directly: it runs `bin/mule-xml-proxy.mjs`, a small Node stdio proxy that starts the real server. pi-lens advertises `workspace.didChangeWatchedFiles.dynamicRegistration: true` in `initialize`, and with that flag LemMinX stays silent after the handshake (no `publishDiagnostics`, so pi-lens shows nothing and no error). `.pi-lens.json` has no field to change client capabilities, so the proxy rewrites that single flag to `false` in the `initialize` request. Every other client message and all server output pass through unchanged. The proxy exits with the server's exit code, closes the server's stdin when pi-lens closes its pipe (and sends the server `SIGTERM` 5 s later if it is still running), and stops the JVM on `SIGTERM`/`SIGINT`/`SIGHUP` (`SIGKILL` after 2 s if it ignores `SIGTERM`). If the stdout/stdin pipe to pi-lens breaks (EPIPE) or the proxy hits an unexpected error, it stops the JVM too, so no orphaned server is left behind.
+
+If diagnostics are missing, run `mule-xml-lsp --check` (it prints `node=` and `proxy=`) and `npm run test:local`, whose probe sends pi-lens's full capability set and fails if the server publishes nothing.
 
 ## Known limitations
 
