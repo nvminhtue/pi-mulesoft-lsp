@@ -1,6 +1,6 @@
 ---
 name: mulesoft
-description: Work on MuleSoft 4 (Anypoint) projects: flow XML layout, validating Mule XML with pi-lens LSP diagnostics, connector schema catalog. Use when a directory has mule-artifact.json or editing src/main/mule/*.xml.
+description: "Work on MuleSoft 4 (Anypoint) projects: flow XML layout, validating Mule XML with pi-lens LSP diagnostics, connector schema catalog. Use when a directory has mule-artifact.json or editing src/main/mule/*.xml."
 ---
 
 # MuleSoft 4 projects
