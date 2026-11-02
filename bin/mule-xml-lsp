@@ -4,11 +4,12 @@
 # Usage: mule-xml-lsp [--check]
 # Env: MULE_LSP_JAVA_HOME, MULE_LSP_STUDIO, MULE_LSP_VSCODE_EXT,
 #      MULE_LSP_REQUIRE_MARKER=1 (serve a no-op LSP unless a mule-artifact.json is within 2 levels of $PWD),
-#      MULE_LSP_NODE (node binary used for the no-op LSP).
+#      MULE_LSP_NODE (node binary used for the no-op LSP and the stdio proxy).
 set -euo pipefail
 shopt -s nullglob
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+NODE="${MULE_LSP_NODE:-node}"
 
 # --- Global-mode gate: runs before any Java lookup so non-Mule XML never spawns a JVM ---
 if [ "${MULE_LSP_REQUIRE_MARKER:-}" = "1" ] && [ "${1:-}" != "--check" ]; then
@@ -17,7 +18,7 @@ if [ "${MULE_LSP_REQUIRE_MARKER:-}" = "1" ] && [ "${1:-}" != "--check" ]; then
     if [ -e "$candidate" ]; then has_marker=1; break; fi
   done
   if [ "$has_marker" -eq 0 ]; then
-    exec "${MULE_LSP_NODE:-node}" "$HERE/mule-null-lsp.mjs"
+    exec "$NODE" "$HERE/mule-null-lsp.mjs"
   fi
 fi
 
@@ -37,6 +38,13 @@ MISSING=()
 report_missing() {
   if [ "$CHECK" -eq 1 ]; then MISSING+=("$1: $2"); else fail "$2"; fi
 }
+
+# --- Node + stdio proxy ---
+PROXY="$HERE/mule-xml-proxy.mjs"
+if [ "$CHECK" -eq 1 ]; then
+  if NODE_PATH_RESOLVED=$(command -v "$NODE"); then echo "node=$NODE_PATH_RESOLVED" >&2; else MISSING+=("node: '$NODE' not found. Set MULE_LSP_NODE."); fi
+  if [ -f "$PROXY" ]; then echo "proxy=$PROXY" >&2; else MISSING+=("proxy: '$PROXY' not found."); fi
+fi
 
 # --- Java 17 (bundled with Studio) ---
 if [ -n "${MULE_LSP_JAVA_HOME:-}" ]; then
@@ -80,4 +88,7 @@ if [ "$CHECK" -eq 1 ]; then
   exit 0
 fi
 
-exec "$J/bin/java" -cp "$CP" org.eclipse.lemminx.XMLServerLauncher
+# The proxy forces workspace.didChangeWatchedFiles.dynamicRegistration=false in `initialize` (LemMinX never
+# publishes diagnostics when pi-lens advertises true) and otherwise passes LSP traffic through untouched.
+command -v "$NODE" >/dev/null 2>&1 || fail "node binary '$NODE' not found. Install Node or set MULE_LSP_NODE."
+exec "$NODE" "$PROXY" -- "$J/bin/java" -cp "$CP" org.eclipse.lemminx.XMLServerLauncher

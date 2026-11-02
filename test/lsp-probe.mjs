@@ -20,6 +20,97 @@ if (!projectArg || !fileArg) {
   process.exit(2);
 }
 
+// pi-lens's global CLIENT_CAPABILITIES (src/clients/lsp/client.ts), verbatim. Do not trim it: the important bit is
+// workspace.didChangeWatchedFiles.dynamicRegistration=true, which makes LemMinX go silent unless the
+// mule-xml-proxy rewrites it (regression guard for the missing-diagnostics bug).
+const PI_LENS_CAPABILITIES = {
+  "general": {
+    "positionEncodings": [
+      "utf-16",
+      "utf-8"
+    ]
+  },
+  "window": {},
+  "workspace": {
+    "workspaceFolders": true,
+    "configuration": true,
+    "didChangeWatchedFiles": {
+      "dynamicRegistration": true
+    },
+    "fileOperations": {
+      "dynamicRegistration": false,
+      "willRename": true,
+      "didRename": true,
+      "didCreate": true
+    }
+  },
+  "textDocument": {
+    "synchronization": {
+      "dynamicRegistration": false,
+      "willSave": false,
+      "willSaveWaitUntil": false,
+      "didSave": true
+    },
+    "completion": {
+      "dynamicRegistration": false,
+      "completionItem": {
+        "snippetSupport": false
+      }
+    },
+    "hover": {
+      "dynamicRegistration": false
+    },
+    "signatureHelp": {
+      "dynamicRegistration": false
+    },
+    "definition": {
+      "dynamicRegistration": false
+    },
+    "typeDefinition": {
+      "dynamicRegistration": false
+    },
+    "implementation": {
+      "dynamicRegistration": false
+    },
+    "references": {
+      "dynamicRegistration": false
+    },
+    "documentSymbol": {
+      "dynamicRegistration": false
+    },
+    "codeAction": {
+      "dynamicRegistration": false,
+      "dataSupport": true,
+      "resolveSupport": {
+        "properties": [
+          "edit",
+          "command"
+        ]
+      },
+      "codeActionLiteralSupport": {
+        "codeActionKind": {
+          "valueSet": [
+            "quickfix",
+            "refactor",
+            "refactor.extract",
+            "refactor.inline",
+            "refactor.rewrite",
+            "source",
+            "source.organizeImports"
+          ]
+        }
+      }
+    },
+    "rename": {
+      "dynamicRegistration": false
+    },
+    "publishDiagnostics": {
+      "relatedInformation": true,
+      "versionSupport": true
+    }
+  }
+};
+
 const log = (...a) => console.log("[probe]", ...a);
 const projectDir = realpathSync(projectArg);
 const configPath = configArg ? resolve(configArg) : resolve(projectDir, ".pi-lens.json");
@@ -115,10 +206,11 @@ let exitCode = 0;
       processId: process.pid,
       rootUri,
       workspaceFolders: [{ uri: rootUri, name: basename(projectDir) }],
-      capabilities: { workspace: { configuration: true, didChangeConfiguration: { dynamicRegistration: false } } },
+      capabilities: PI_LENS_CAPABILITIES,
       initializationOptions: blob,
     }, Number(process.env.PI_LENS_LSP_INIT_TIMEOUT_MS ?? 30000));
     log(`init_ms=${Date.now() - t0}`);
+    log(`capabilities.workspace.didChangeWatchedFiles.dynamicRegistration=${PI_LENS_CAPABILITIES.workspace.didChangeWatchedFiles.dynamicRegistration}`);
     if (init.error) throw new Error(`initialize error ${JSON.stringify(init.error)}`);
     notify("initialized", {});
     notify("workspace/didChangeConfiguration", { settings: blob });
@@ -128,6 +220,7 @@ let exitCode = 0;
     await sleep(waitMs);
     log(`publishDiagnostics notifications: ${diagnostics.length}`);
     for (const d of diagnostics) console.log(JSON.stringify(d));
+    if (diagnostics.length === 0) throw new Error("no publishDiagnostics received (server silent after initialize)");
     await request("shutdown", null, 10000);
     log("shutdown ok");
     notify("exit", null);

@@ -23,6 +23,7 @@ bash "$BIN/mule-xml-lsp" --check >/dev/null 2>&1; check "mule-xml-lsp --check ex
 OUT=$(MULE_LSP_JAVA_HOME=/nonexistent bash "$BIN/mule-xml-lsp" --check 2>"$T/check.err"); RC=$?
 check "failure path: exit 1 and empty stdout" test "$RC" -eq 1 -a -z "$OUT"
 check "failure path: reports missing=java_home" grep -q '^missing=java_home' "$T/check.err"
+bash "$BIN/mule-xml-lsp" --check 2>"$T/check-ok.err"; check "--check reports node and proxy" bash -c 'grep -q "^node=" "$1" && grep -q "^proxy=.*mule-xml-proxy.mjs\$" "$1"' _ "$T/check-ok.err"
 
 # --- catalog generation (into the temp data dir) ---
 bash "$BIN/mule-xsd-catalog" >"$T/cat.out" 2>"$T/cat.err"; check "mule-xsd-catalog exits 0" test $? -eq 0
@@ -67,6 +68,7 @@ probe_ok() {
   [ "$(cat "$T/$1.rc")" = "0" ] && grep -q '^\[probe\] shutdown ok' "$T/$1.out" \
     && [ "$(diag_summary "$T/$1.out" "$1.xml" | cut -d' ' -f1)" -ge 0 ]
 }
+check "probe sends pi-lens capabilities (didChangeWatchedFiles.dynamicRegistration=true)" grep -q 'didChangeWatchedFiles.dynamicRegistration=true' "$T/bad-core.out"
 for f in $PROBES; do check "probe $f: >=1 publishDiagnostics and clean shutdown" probe_ok "$f"; done
 
 read -r CORE_N CORE_BAD < <(diag_summary "$T/bad-core.out" bad-core.xml)
